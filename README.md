@@ -1,14 +1,16 @@
 # BleeqUP Ranger Sync (`ranger-sync`)
 
-Time-sync, clock-skew recovery, and GPX geotagging utility for **BleeqUP Ranger AI cycling glasses** media on macOS.
+Time-sync, clock-skew recovery, optical/camera EXIF enrichment, and GPX geotagging utility for [**BleeqUP Ranger AI Sports Camera Glasses**](https://www.bleequp.com/products/bleequp-ranger-ai-sports-camera-glasses) media on macOS.
+
+> **Note:** BleeqUP support has confirmed that native EXIF & GPS metadata embedding is on their roadmap for a future firmware/app release. Until that arrives—and for recovering from pre-Bluetooth-sync RTC/DST clock jumps—`ranger-sync` bridges the gap so your cycling photos and clips integrate seamlessly with Apple Photos, DaVinci Resolve, Lightroom, and Finder alongside iPhone media.
 
 ## Why This Tool Exists
 
-Media exported from **BleeqUP Ranger** AI cycling glasses has several metadata challenges when mixed into a library with iPhone photos/videos (Apple Photos, DaVinci Resolve, Lightroom, Finder):
+Media exported from [**BleeqUP Ranger**](https://www.bleequp.com/products/bleequp-ranger-ai-sports-camera-glasses) AI cycling glasses has several metadata challenges when mixed into a library with iPhone photos/videos (Apple Photos, DaVinci Resolve, Lightroom, Finder):
 
-1. **Missing EXIF & Overwritten QuickTime Capture Metadata:**
-   - Exported `.JPG` photos lack `EXIF:DateTimeOriginal`, camera `Make`/`Model`, and GPS coordinates.
-   - Exported `.MP4` videos have their `Keys:CreationDate` and QuickTime `CreateDate` overwritten by the iOS save/export timestamp (e.g., `13:12`–`13:21` in reverse chronological order), while the true UTC capture epoch in milliseconds is only preserved in the filename (`IMG_1793437400537.JPG`, `VIDEO_1793434415483.MP4`).
+1. **Missing EXIF, Camera/Lens Specs & Overwritten QuickTime Capture Metadata:**
+   - Exported `.JPG` photos (`4656 × 3496` from the 16MP `1/3.09"` CMOS sensor) lack `EXIF:DateTimeOriginal`, camera `Make`/`Model`, lens optical specifications (`120°` ultra-wide POV lens, `1.8mm` / `14mm` 35mm-eq.), and GPS coordinates.
+   - Exported `.MP4` videos (`2880 × 1620` @ 30fps with EIS) have their `Keys:CreationDate` and QuickTime `CreateDate` overwritten by the iOS save/export timestamp (e.g., `13:12`–`13:21` in reverse chronological order), while the true UTC capture epoch in milliseconds is only preserved in the filename (`IMG_1793437400537.JPG`, `VIDEO_1793434415483.MP4`).
 2. **Pre-Sync Clock Skew / DST Jump ("The 1-Hour Out-of-Order Bug"):**
    - BleeqUP Ranger glasses only sync their internal Real-Time Clock (RTC) when connected via Bluetooth to the BleeqUP iPhone app.
    - If you start recording a ride before the glasses sync with the app (especially after a Daylight Saving Time change or multi-day standby), early clips carry a `+1h` (plus RTC quartz drift) filename timestamp. Once the glasses connect to the phone mid-ride, the clock snaps backward, causing early-ride files to sort **in the middle of the ride** and overlap mid-ride recordings.

@@ -73,13 +73,15 @@ When the iPhone is connected to macOS Finder (`Files` tab $\rightarrow$ `BleeqUp
 
 ### D. Metadata Injection Matrix (`exiftool`)
 
+Optical & sensor metadata is populated from the official [**BleeqUP Ranger AI Sports Camera Glasses**](https://www.bleequp.com/products/bleequp-ranger-ai-sports-camera-glasses) hardware specifications (`16 MP` `1/3.09"` CMOS sensor, `4656 × 3496` stills, `2880 × 1620` 3K video, `120°` diagonal ultra-wide POV lens $\approx 1.8\text{ mm}$ physical / $14\text{ mm}$ 35mm-equivalent focal length):
+
 | Target Format | Metadata Group | Tags Written | Value / Timezone Rule |
 | :--- | :--- | :--- | :--- |
-| **Photos (`.JPG`, `.PNG`)** | EXIF / IFD0 | `Make="BleeqUP"`, `Model="Ranger"` | Device identification for Apple Photos / Lightroom |
-| | EXIF / SubIFD | `DateTimeOriginal`, `CreateDate`, `ModifyDate`<br>`SubSecTimeOriginal`, `OffsetTimeOriginal`, `OffsetTime` | Local time (`YYYY:MM:DD HH:MM:SS`), milliseconds (`SSS`), and IANA TZ offset (`+01:00`) |
+| **Photos (`.JPG`, `.PNG`)** | EXIF / IFD0 & Lens | `Make="BleeqUP"`, `Model="Ranger"`<br>`UniqueCameraModel="BleeqUP Ranger AI Sports Camera Glasses"`<br>`LensMake="BleeqUP"`<br>`LensModel="BleeqUP Ranger 120° Ultra-Wide POV (14mm eq.)"`<br>`FocalLength=1.8`, `FocalLengthIn35mmFormat=14`<br>`Software="bleequp-ranger-sync"` | Device & optical identification for Apple Photos / Lightroom / DaVinci Resolve |
+| | EXIF / SubIFD | `DateTimeOriginal`, `CreateDate`, `ModifyDate`<br>`SubSecTimeOriginal`, `SubSecTimeDigitized`, `SubSecTime`<br>`OffsetTimeOriginal`, `OffsetTimeDigitized`, `OffsetTime` | Local time (`YYYY:MM:DD HH:MM:SS`), milliseconds (`SSS`), and IANA TZ offset (`+01:00`) |
 | | EXIF / GPS | `GPSLatitude`, `GPSLongitude`, `GPSAltitude`<br>`GPSLatitudeRef`, `GPSLongitudeRef`, `GPSAltitudeRef`<br>`GPSDateStamp`, `GPSTimeStamp` | Interpolated WGS84 coordinates & UTC GPS timestamp |
-| **Videos (`.MP4`)** | QuickTime / ItemList | `Make="BleeqUP"`, `Model="Ranger"` | Device identification |
+| **Videos (`.MP4`)** | QuickTime / Keys & XMP Lens | `Keys:Make="BleeqUP"`, `Keys:Model="Ranger"`<br>`Keys:Software="bleequp-ranger-sync"`<br>`XMP:LensMake="BleeqUP"`<br>`XMP:LensModel="BleeqUP Ranger 120° Ultra-Wide POV (14mm eq.)"`<br>`XMP:FocalLength=1.8`, `XMP:FocalLengthIn35mmFormat=14` | Device & optical identification |
 | | QuickTime Atoms | `QuickTime:CreateDate`, `QuickTime:ModifyDate`<br>`TrackCreateDate`, `MediaCreateDate` | **UTC** (`YYYY:MM:DD HH:MM:SS`) per QuickTime specification |
 | | Apple Keys / UserData | `Keys:CreationDate`, `UserData:DateTimeOriginal` | **Local ISO 8601 with TZ offset** (`YYYY:MM:DD HH:MM:SS+01:00`) — required by Apple Photos |
-| | QuickTime / Keys GPS | `Keys:GPSCoordinates`, `UserData:GPSCoordinates` | ISO 6709 string (`+39.8738+003.0845+005.2/`) |
+| | QuickTime / Keys GPS | `Keys:GPSCoordinates`, `UserData:GPSCoordinates` | ISO 6709 string (`+39.873800+003.084500+005.20/`) |
 | **macOS Filesystem** | Inode (`btime`, `mtime`) | `FileCreateDate`, `FileModifyDate` | Local timestamp with offset (restores chronological sorting in Finder) |

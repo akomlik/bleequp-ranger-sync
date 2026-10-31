@@ -30,7 +30,10 @@ Analysis of the October 31, 2026 Mallorca ride dataset (`7,218` GPX trackpoints 
 
 ### A. The "+1 Hour Out of Order" Anomaly (Pre-Sync RTC / DST Skew)
 - **Symptom:** Seven files captured at the start of the ride (`08:58`–`09:07` CET, on the coastal bike path past Restaurant Can Cuarassa and Hotel Uyal into Pro Cycle Hire in Port de Pollença) have filename epochs between `10:02:48` and `10:11:16` CET (`09:02:48Z`–`09:11:16Z`).
-- **Root Cause:** BleeqUP Ranger glasses rely on an internal RTC that only syncs when connected via Bluetooth to the BleeqUP iPhone app. Prior to connecting at Pro Cycle Hire (~`09:10` CET), the glasses' clock was still on CEST (`+1h`) plus `+3m 57s` of quartz drift (`+3,837s` total). When the glasses connected to the phone at Pro Cycle Hire, their clock jumped backward by `1h 03m 57s`.
+- **Root Cause (BLE Tracking vs. Camera SoC Handshake):**
+  - Even though the glasses were connected to the iPhone and running BleeqUP's **AI-Tracking** before the ride (`1793432585471.gpx` started at `08:43:05 CET`), starting AI-Tracking only communicates with the glasses' **BLE audio/telemetry subsystem**—it does **not** wake or sync the **Camera SoC's internal RTC**.
+  - Prior to Pro Cycle Hire, the Camera SoC was already recording in `2880×1620` (3K), while its internal RTC was still on CEST (`+1h`) plus `+3m 57s` of quartz drift (`+3,837s` total), and the iPhone app UI showed a stale default (`1080p`) because it had not queried the Camera SoC.
+  - At Pro Cycle Hire (~`09:08` CET), stopping AI-Tracking and opening **Camera Settings** to switch `1080p` $\rightarrow$ `3K` triggered a full Camera SoC handshake, which immediately synced the Camera SoC's RTC to iOS time—jumping the clock backward by `1h 03m 57s`.
 - **Automatic Detection Signal:**
   - `VIDEO_1793437571094.MP4` is a continuous `180.0s` video recorded from `09:06:11Z` to `09:09:11Z` during the group ride inland.
   - Three pre-sync files (`IMG_1793437637238.jpg` at `09:07:17Z`, `VIDEO_1793437646586.MP4` [`60s`] at `09:07:26Z`, and `VIDEO_1793437709396.MP4` [`60s`] at `09:08:29Z`) fall **inside** that 3-minute video window—an impossible physical overlap for a single camera.

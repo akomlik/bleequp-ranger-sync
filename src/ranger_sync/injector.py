@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import subprocess
 from datetime import timezone
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from .models import MediaItem
@@ -76,7 +77,7 @@ def build_exiftool_args_for_item(
                 ]
             )
     else:
-        # Photo (.JPG, .JPEG, .PNG)
+        # Photo (.JPG, .JPEG, .PNG — note BleeqUP .PNG files are often JPEG-encoded internally)
         args.extend(
             [
                 "-IFD0:Make=BleeqUP",
@@ -85,16 +86,14 @@ def build_exiftool_args_for_item(
                 f"-EXIF:CreateDate={loc_str}",
                 f"-EXIF:ModifyDate={loc_str}",
                 f"-EXIF:SubSecTimeOriginal={ms_str}",
-                f"-EXIF:SubSecCreateDate={ms_str}",
-                f"-EXIF:SubSecModifyDate={ms_str}",
+                f"-EXIF:SubSecTimeDigitized={ms_str}",
+                f"-EXIF:SubSecTime={ms_str}",
                 f"-EXIF:OffsetTimeOriginal={tz_off}",
                 f"-EXIF:OffsetTimeDigitized={tz_off}",
                 f"-EXIF:OffsetTime={tz_off}",
                 f"-XMP:DateCreated={loc_iso_tz}",
             ]
         )
-        if suffix == ".png":
-            args.append(f"-PNG:CreationTime={loc_iso_tz}")
         if item.matched_source_file:
             args.append(
                 f"-EXIF:UserComment=BleeqUP AI Motion derived from {item.matched_source_file}"
@@ -164,30 +163,49 @@ def apply_metadata_and_renames(
         return len(bleequp_items), renames
 
     exiftool_bin = find_exiftool()
-    # Build argfile payload using -execute between files for single-process batch execution
-    argfile_lines: list[str] = ["-charset", "filename=utf8"]
+    # Handle BleeqUP quirk where .PNG files are actually JPEG-encoded internally (magic \xff\xd8\xff)
+    temp_jpeg_swaps: list[tuple[MediaItem, Path, Path]] = []
     for item in bleequp_items:
-        file_args = build_exiftool_args_for_item(
-            item=item,
-            tz=tz,
-            write_filesystem=write_filesystem,
-            overwrite_original=overwrite_original,
-        )
-        argfile_lines.extend(file_args)
-        argfile_lines.append("-execute")
+        if item.path.suffix.lower() == ".png" and item.path.is_file():
+            with open(item.path, "rb") as fp:
+                magic = fp.read(3)
+            if magic == b"\xff\xd8\xff":
+                orig_path = item.path
+                tmp_path = item.path.with_name(item.path.name + ".tmp_exif.jpg")
+                orig_path.rename(tmp_path)
+                item.path = tmp_path
+                temp_jpeg_swaps.append((item, orig_path, tmp_path))
 
-    payload = "\n".join(argfile_lines) + "\n"
-    proc = subprocess.run(
-        [exiftool_bin, "-@", "-"],
-        input=payload,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if proc.returncode != 0:
-        raise RuntimeError(
-            f"exiftool batch execution failed (exit {proc.returncode}):\n{proc.stderr}\n{proc.stdout}"
+    try:
+        # Build argfile payload using -execute between files for single-process batch execution
+        argfile_lines: list[str] = ["-charset", "filename=utf8"]
+        for item in bleequp_items:
+            file_args = build_exiftool_args_for_item(
+                item=item,
+                tz=tz,
+                write_filesystem=write_filesystem,
+                overwrite_original=overwrite_original,
+            )
+            argfile_lines.extend(file_args)
+            argfile_lines.append("-execute")
+
+        payload = "\n".join(argfile_lines) + "\n"
+        proc = subprocess.run(
+            [exiftool_bin, "-@", "-"],
+            input=payload,
+            capture_output=True,
+            text=True,
+            check=False,
         )
+        if proc.returncode != 0:
+            raise RuntimeError(
+                f"exiftool batch execution failed (exit {proc.returncode}):\n{proc.stderr}\n{proc.stdout}"
+            )
+    finally:
+        for item, orig_path, tmp_path in temp_jpeg_swaps:
+            if tmp_path.exists():
+                tmp_path.rename(orig_path)
+            item.path = orig_path
 
     # Perform renames after ExifTool finishes writing
     applied_renames: list[tuple[str, str]] = []

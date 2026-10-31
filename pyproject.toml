@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bleequp-ranger-sync"
+version = "0.1.0"
+description = "Time-sync, clock-skew recovery, and GPX geotagging utility for BleeqUP Ranger AI cycling glasses media on macOS"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [
+    {name = "Alexander Komlik", email = "akomlik@gmail.com"}
+]
+dependencies = []
+
+[project.scripts]
+ranger-sync = "ranger_sync.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

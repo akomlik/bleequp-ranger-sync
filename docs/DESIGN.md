@@ -54,9 +54,16 @@ Analysis of the October 31, 2026 Mallorca ride dataset (`7,218` GPX trackpoints 
    - Matched via macOS `Vision` (`VNGenerateImageFeaturePrintRequest`) to the closest `IMG_*` capture:
      - `BleeqUp_Motion_1793450679296.{PNG,jpg}` $\rightarrow$ `IMG_1793440997373.jpg` (Playa de Muro tourist train, feature distance `0.584`)
      - `BleeqUp_Motion_1793450741057.{PNG,jpg}` $\rightarrow$ `IMG_1793437400537.JPG` (Can Cuarassa rainbow, feature distance `0.768`)
-   - Assigned capture timestamp = `source_timestamp + 1s` (so they sort immediately beside the original photo) and identical GPS coordinates.
+   - By default, keeps the AI generation timestamp as-is (or optionally shifts to `source_timestamp + 1s` when `--sync-ai-motion-time` is passed) while inheriting the matched source photo's exact GPS coordinates and recording provenance in `EXIF:UserComment`.
 4. **AI Highlight Video:** `^VIDEO_HIGHLIGHT_(\d{10})(\d{3})\.mp4$`
 5. **AI Remix Video:** `^BleeqUp_Remix_(\d{10})(\d{3})_ai\.mp4$`
+
+### E. iPhone Finder `Files -> BleeqUp` Container Artifacts
+When the iPhone is connected to macOS Finder (`Files` tab $\rightarrow$ `BleeqUp`), the app exposes its documents container (`UIFileSharingEnabled`):
+- `1793432585471.gpx` (`08:43:05 CET`, modified `09:09 AM`) and `1793434466864.gpx` (`09:14:26 CET`, modified `11:46 AM`): BleeqUp's own phone-recorded GPX tracks, split right at the `09:06`–`09:09 AM` Pro Cycle Hire stop where `agorasdk.1.log` (`09:06 AM`) re-initialized the glasses connection and snapped the glasses' RTC back by `1h 03m 57s`.
+- `app_database.db`: Local SQLite database maintained by the BleeqUp iOS app.
+- `imuout_<13-digit-ms>.csv`: Per-clip IMU gyroscope/accelerometer telemetry files named with the same 13-digit epoch ms as the video clips.
+- `ranger-sync` automatically ingests multiple `.gpx` files if dragged into the ride folder and ignores non-media sidecars (`*.csv`, `*.log`, `*.db`).
 
 ### C. Stationary Stop-Gap Interpolation in GPX
 - At Pro Cycle Hire (`39.8973, 3.0755`), the GPX recording paused from `08:05:50Z` to `08:39:03Z` (`33m 13s`), while spatial distance between the two trackpoints is only **46 meters**.

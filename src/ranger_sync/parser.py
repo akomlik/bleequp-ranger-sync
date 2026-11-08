@@ -105,6 +105,7 @@ def scan_media_directory(directory: Path) -> list[MediaItem]:
         "-json",
         "-n",
         "-Duration",
+        "-Software",
         "-CreationDate",
         "-DateTimeOriginal",
         "-SubSecDateTimeOriginal",
@@ -129,8 +130,28 @@ def scan_media_directory(directory: Path) -> list[MediaItem]:
         lon_f = float(lon) if isinstance(lon, (int, float)) else None
         ele_f = float(ele) if isinstance(ele, (int, float)) else None
 
+        init_shift_sec = 0.0
+        init_shift_reason = None
+
         if epoch_ms is not None:
             raw_utc = datetime.fromtimestamp(epoch_ms / 1000.0, tz=timezone.utc)
+            corrected_utc = raw_utc
+            # If previously synced by bleequp-ranger-sync without --rename-shifted, honor embedded shifted time
+            if str(meta.get("Software") or "") == "bleequp-ranger-sync":
+                emb_utc = (
+                    _parse_exif_datetime_utc(meta.get("SubSecDateTimeOriginal"))
+                    or _parse_exif_datetime_utc(meta.get("CreationDate"))
+                    or _parse_exif_datetime_utc(meta.get("DateTimeOriginal"))
+                    or _parse_exif_datetime_utc(meta.get("CreateDate"))
+                )
+                if emb_utc is not None:
+                    diff_s = round(emb_utc.timestamp() - (epoch_ms // 1000))
+                    if abs(diff_s) >= 2 and abs(diff_s) <= 86400:
+                        corrected_utc = datetime.fromtimestamp(
+                            (epoch_ms / 1000.0) + diff_s, tz=timezone.utc
+                        )
+                        init_shift_sec = float(diff_s)
+                        init_shift_reason = f"existing_exif_shift({diff_s:+d}s)"
         else:
             # Reference iPhone media: prefer SubSecDateTimeOriginal, CreationDate, DateTimeOriginal, CreateDate
             dt_utc = (
@@ -142,6 +163,7 @@ def scan_media_directory(directory: Path) -> list[MediaItem]:
             if dt_utc is None:
                 dt_utc = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
             raw_utc = dt_utc
+            corrected_utc = dt_utc
 
         items.append(
             MediaItem(
@@ -150,7 +172,9 @@ def scan_media_directory(directory: Path) -> list[MediaItem]:
                 kind=kind,
                 raw_epoch_ms=epoch_ms,
                 raw_utc=raw_utc,
-                corrected_utc=raw_utc,
+                corrected_utc=corrected_utc,
+                time_shift_sec=init_shift_sec,
+                shift_reason=init_shift_reason,
                 duration_sec=dur,
                 existing_lat=lat_f,
                 existing_lon=lon_f,

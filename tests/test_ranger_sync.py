@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 
 from ranger_sync.anomaly import (
     apply_shift_spec,
+    auto_detect_clock_skew,
     detect_timeline_overlaps,
     parse_offset_seconds,
 )
@@ -93,6 +94,52 @@ class TestRangerSync(unittest.TestCase):
             vid_overlap.new_filename_for_shift(),
             "VIDEO_1793433809586.MP4",
         )
+
+    def test_auto_detect_clock_skew(self) -> None:
+        # Simulate Oct 31 mid-ride Camera Settings handshake overlap
+        gpx = GpxIndex(
+            [
+                TrackPoint(timestamp=1793432650.0, lat=39.86, lon=3.14, ele=10.0),
+                TrackPoint(timestamp=1793433965.0, lat=39.8972, lon=3.0754, ele=3.0),
+                TrackPoint(timestamp=1793435939.0, lat=39.8972, lon=3.0754, ele=3.0),
+                TrackPoint(timestamp=1793442739.0, lat=39.86, lon=3.14, ele=10.0),
+            ]
+        )
+        # Pre-sync items (+3770s fast) mixed with a 180s post-sync mid-ride item
+        pre1 = MediaItem(
+            path=Path("/tmp/VIDEO_1793437646586.MP4"),
+            filename="VIDEO_1793437646586.MP4",
+            kind=MediaKind.BLEEQUP_VIDEO,
+            raw_epoch_ms=1793437646586,
+            raw_utc=datetime.fromtimestamp(1793437646.586, tz=timezone.utc),
+            corrected_utc=datetime.fromtimestamp(1793437646.586, tz=timezone.utc),
+            duration_sec=60.0,
+        )
+        pre2 = MediaItem(
+            path=Path("/tmp/VIDEO_1793437709396.MP4"),
+            filename="VIDEO_1793437709396.MP4",
+            kind=MediaKind.BLEEQUP_VIDEO,
+            raw_epoch_ms=1793437709396,
+            raw_utc=datetime.fromtimestamp(1793437709.396, tz=timezone.utc),
+            corrected_utc=datetime.fromtimestamp(1793437709.396, tz=timezone.utc),
+            duration_sec=60.0,
+        )
+        mid_peloton = MediaItem(
+            path=Path("/tmp/VIDEO_1793437571094.MP4"),
+            filename="VIDEO_1793437571094.MP4",
+            kind=MediaKind.BLEEQUP_VIDEO,
+            raw_epoch_ms=1793437571094,
+            raw_utc=datetime.fromtimestamp(1793437571.094, tz=timezone.utc),
+            corrected_utc=datetime.fromtimestamp(1793437571.094, tz=timezone.utc),
+            duration_sec=180.0,
+        )
+        items = [pre1, pre2, mid_peloton]
+        shifted, desc = auto_detect_clock_skew(items, gpx)
+        self.assertEqual(len(shifted), 2)
+        self.assertIn(pre1, shifted)
+        self.assertIn(pre2, shifted)
+        self.assertNotIn(mid_peloton, shifted)
+        self.assertEqual(len(detect_timeline_overlaps(items)), 0)
 
 
 if __name__ == "__main__":

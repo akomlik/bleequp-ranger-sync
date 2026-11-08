@@ -160,7 +160,15 @@ def apply_metadata_and_renames(
     Returns (updated_count, list of (old_filename, new_filename) renames).
     """
     bleequp_items = [i for i in items if i.is_bleequp]
-    if not bleequp_items:
+    iphone_fs_items = [
+        i
+        for i in items
+        if not i.is_bleequp
+        and write_filesystem
+        and i.path.is_file()
+        and abs(i.path.stat().st_mtime - i.corrected_utc.timestamp()) > 2.0
+    ]
+    if not bleequp_items and not iphone_fs_items:
         return 0, []
 
     renames: list[tuple[str, str]] = []
@@ -199,6 +207,21 @@ def apply_metadata_and_renames(
             )
             argfile_lines.extend(file_args)
             argfile_lines.append("-execute")
+
+        for item in iphone_fs_items:
+            dt_loc = item.corrected_utc.astimezone(tz)
+            loc_str = dt_loc.strftime("%Y:%m:%d %H:%M:%S")
+            tz_off = _format_tz_offset(dt_loc)
+            loc_iso_tz = f"{loc_str}{tz_off}"
+            argfile_lines.extend(
+                [
+                    "-overwrite_original",
+                    f"-FileCreateDate={loc_iso_tz}",
+                    f"-FileModifyDate={loc_iso_tz}",
+                    str(item.path),
+                    "-execute",
+                ]
+            )
 
         payload = "\n".join(argfile_lines) + "\n"
         proc = subprocess.run(

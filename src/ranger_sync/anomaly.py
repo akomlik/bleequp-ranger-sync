@@ -147,3 +147,134 @@ def detect_simultaneous_shots(
                 pairs.append((b, ref, start_diff, gps_diff))
 
     return pairs
+
+
+def auto_detect_clock_skew(
+    items: list[MediaItem],
+    gpx_index,
+) -> tuple[list[MediaItem], str | None]:
+    """Automatically detect and resolve BleeqUP Camera SoC sleep-oscillator clock skew.
+
+    Handles two physical patterns:
+      1. Whole-ride unsynced drift (e.g. Oct 29 Coll de sa Batalla `-2482s`):
+         All BleeqUP captures are shifted forward by +Δt, causing trailing clips to fall
+         past `gpx_index.end_utc`.
+      2. Mid-ride Camera Settings handshake (e.g. Oct 31 Can Picafort `-3770s`):
+         Early pre-sync captures carry +Δt sleep-oscillator drift and land on top of
+         mid-ride post-sync captures, creating physical `overlap_conflicts` while leaving
+         the pre-stop GPX riding segment empty.
+    """
+    raw_captures = sorted(
+        [
+            i
+            for i in items
+            if i.kind in (MediaKind.BLEEQUP_PHOTO, MediaKind.BLEEQUP_VIDEO)
+        ],
+        key=lambda x: x.raw_utc,
+    )
+    if not raw_captures or gpx_index is None or gpx_index.is_empty:
+        return [], None
+
+    # Do not auto-shift if manual or existing EXIF shifts are already present
+    if any(abs(i.time_shift_sec) >= 2.0 for i in raw_captures):
+        return [], None
+
+    gpx_start = gpx_index.timestamps[0]
+    gpx_end = gpx_index.timestamps[-1]
+
+    # Pattern 1: Whole-ride unsynced sleep-oscillator drift (trailing clips past GPX end)
+    overlaps = detect_timeline_overlaps(items)
+    last_end = max(i.raw_utc.timestamp() + max(0.0, i.duration_sec) for i in raw_captures)
+    first_start = min(i.raw_utc.timestamp() for i in raw_captures)
+    if not overlaps and (gpx_end + 180.0 < last_end <= gpx_end + 14400.0):
+        # Verify shifting all clips back keeps first_start near or after gpx_start - 300s
+        offset_sec = float(round(gpx_end - last_end))
+        if first_start + offset_sec >= gpx_start - 300.0:
+            shifted: list[MediaItem] = []
+            for item in raw_captures:
+                item.time_shift_sec = offset_sec
+                item.corrected_utc = item.raw_utc + timedelta(seconds=offset_sec)
+                item.shift_reason = f"auto_whole_ride_drift({offset_sec:+.0f}s)"
+                shifted.append(item)
+            return shifted, f"*:{offset_sec:+.0f}s (whole-ride Camera SoC drift)"
+
+    # Pattern 2: Mid-ride Camera Settings handshake (physical overlap conflicts)
+    if overlaps:
+        pauses = [
+            (pa, pb, gap_s, dist_m)
+            for pa, pb, gap_s, dist_m in gpx_index.detect_pauses(min_gap_sec=180.0)
+            if dist_m <= 150.0
+        ]
+        if pauses:
+            pa, pb, _, _ = pauses[0]
+            stop_start = pa.timestamp
+            stop_end = pb.timestamp
+            # Identify the window of items around the overlap conflict
+            conflict_names = {a.filename for a, _ in overlaps} | {b.filename for _, b in overlaps}
+            conflict_times = [i.raw_utc.timestamp() for i in raw_captures if i.filename in conflict_names]
+            win_min = min(conflict_times) - 600.0
+            win_max = max(conflict_times) + 600.0
+            window_items = [
+                i for i in raw_captures if win_min <= i.raw_utc.timestamp() <= win_max
+            ]
+
+            best_subset: list[MediaItem] = []
+            best_offset: float = 0.0
+            # Try each item in window_items as the stop-arrival clip (where clip start + ~25s == stop_start)
+            for anchor in window_items:
+                anchor_stop_ts = anchor.raw_utc.timestamp() + min(25.0, max(0.0, anchor.duration_sec * 0.45))
+                cand_offset = float(round(stop_start - anchor_stop_ts))
+                if not (-14400.0 <= cand_offset <= -180.0):
+                    continue
+                # Select maximal non-overlapping subset of window_items that lands inside [gpx_start - 180, stop_end]
+                cand_subset: list[MediaItem] = []
+                for w in window_items:
+                    shifted_t = w.raw_utc.timestamp() + cand_offset
+                    if not (gpx_start - 180.0 <= shifted_t <= stop_end - 60.0):
+                        continue
+                    # Check if w overlaps with any longer item in window_items that is NOT shifted
+                    # Wait: the real mid-ride clip is the one that collides with multiple shorter pre-sync items
+                    cand_subset.append(w)
+
+                # Filter out any single item inside cand_subset that causes internal overlaps within cand_subset
+                filtered_subset: list[MediaItem] = []
+                for idx, w in enumerate(cand_subset):
+                    w_s = w.raw_utc.timestamp()
+                    w_e = w_s + max(0.0, w.duration_sec)
+                    internal_collisions = sum(
+                        1
+                        for other in cand_subset
+                        if other is not w
+                        and not (other.raw_utc.timestamp() + max(0.0, other.duration_sec) - 1.5 <= w_s or other.raw_utc.timestamp() >= w_e - 1.5)
+                    )
+                    if internal_collisions >= 2:
+                        # This item (e.g. a 180s mid-ride peloton clip) collides with >=2 items in the pre-sync sequence; leave it unshifted!
+                        continue
+                    filtered_subset.append(w)
+
+                # Check if shifting filtered_subset by cand_offset eliminates all overlaps
+                for i in raw_captures:
+                    if i in filtered_subset:
+                        i.corrected_utc = i.raw_utc + timedelta(seconds=cand_offset)
+                    else:
+                        i.corrected_utc = i.raw_utc
+                rem_overlaps = detect_timeline_overlaps(items)
+                if len(rem_overlaps) == 0 and len(filtered_subset) > len(best_subset):
+                    best_subset = list(filtered_subset)
+                    best_offset = cand_offset
+
+            # Restore before applying best
+            for i in raw_captures:
+                i.corrected_utc = i.raw_utc
+            detect_timeline_overlaps(items)
+
+            if best_subset and best_offset != 0.0:
+                for item in best_subset:
+                    item.time_shift_sec = best_offset
+                    item.corrected_utc = item.raw_utc + timedelta(seconds=best_offset)
+                    item.shift_reason = f"auto_midride_sync({best_offset:+.0f}s)"
+                detect_timeline_overlaps(items)
+                names_spec = ",".join(i.filename for i in best_subset)
+                return best_subset, f"{names_spec}:{best_offset:+.0f}s (pre-sync Camera SoC cluster)"
+
+    return [], None

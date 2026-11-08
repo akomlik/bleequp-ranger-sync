@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo
 
 from .anomaly import (
     apply_shift_spec,
+    auto_detect_clock_skew,
     detect_simultaneous_shots,
     detect_timeline_overlaps,
 )
@@ -75,6 +76,12 @@ def add_common_arguments(p: argparse.ArgumentParser) -> None:
         default=False,
         help="Shift BleeqUp_Motion_* timestamp to matched source photo (+1s) instead of keeping generation time",
     )
+    p.add_argument(
+        "--auto-shift",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Automatically detect and correct BleeqUP Camera SoC sleep-oscillator clock skew against GPX (default: true)",
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -109,8 +116,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     apply_p.add_argument(
         "--rename-shifted",
-        action="store_true",
-        help="Rename time-shifted BleeqUP files so their 13-digit filename epoch matches corrected time",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Rename time-shifted BleeqUP files so their 13-digit filename epoch matches corrected time (default: true)",
     )
     apply_p.add_argument(
         "--dry-run",
@@ -133,6 +141,10 @@ def prepare_pipeline(args: argparse.Namespace) -> tuple[ZoneInfo, GpxIndex, list
     items = scan_media_directory(directory)
     if args.shift_files:
         apply_shift_spec(items, args.shift_files)
+    elif getattr(args, "auto_shift", True):
+        auto_shifted, auto_desc = auto_detect_clock_skew(items, gpx_index)
+        if auto_shifted and auto_desc:
+            print(f"[✓] AUTO-SOLVED BLEEQUP CLOCK SKEW ({len(auto_shifted)} files): {auto_desc}")
 
     # Interpolate GPX fixes for raw BleeqUP captures first
     for item in items:

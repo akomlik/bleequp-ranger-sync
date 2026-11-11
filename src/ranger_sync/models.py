@@ -56,6 +56,7 @@ class MediaItem:
     time_shift_sec: float = 0.0
     shift_reason: str | None = None
     duration_sec: float = 0.0
+    internal_create_utc: datetime | None = None
     existing_lat: float | None = None
     existing_lon: float | None = None
     existing_ele: float | None = None

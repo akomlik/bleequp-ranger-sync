@@ -180,6 +180,59 @@ class TestRangerSync(unittest.TestCase):
         ):
             assert_physical_continuity([c1, c2])
 
+    def test_epoch_1_8b_2027_rollover_and_photo_batch_and_brownout(self) -> None:
+        # 1. Jan 2027 Epoch 1.8B rollover
+        self.assertEqual(
+            classify_filename("IMG_1800000000123.JPG"),
+            (MediaKind.BLEEQUP_PHOTO, 1800000000123),
+        )
+
+        # 2. <250ms still photo batch-export collision
+        p1 = MediaItem(
+            path=Path("IMG_1762770000000.JPG"),
+            filename="IMG_1762770000000.JPG",
+            kind=MediaKind.BLEEQUP_PHOTO,
+            raw_epoch_ms=1762770000000,
+            raw_utc=datetime.fromtimestamp(1762770000.0, tz=timezone.utc),
+            corrected_utc=datetime.fromtimestamp(1762770000.0, tz=timezone.utc),
+            duration_sec=0.0,
+        )
+        p2 = MediaItem(
+            path=Path("IMG_1762770000091.JPG"),
+            filename="IMG_1762770000091.JPG",
+            kind=MediaKind.BLEEQUP_PHOTO,
+            raw_epoch_ms=1762770000091,
+            raw_utc=datetime.fromtimestamp(1762770000.091, tz=timezone.utc),
+            corrected_utc=datetime.fromtimestamp(1762770000.091, tz=timezone.utc),
+            duration_sec=0.0,
+        )
+        with self.assertRaises(PhysicalOverlapError):
+            assert_physical_continuity([p1, p2], use_raw=True)
+
+        # 3. Backward -55m RTC brownout landing inside a silent cafe pause
+        v_early = MediaItem(
+            path=Path("VIDEO_1762765200000.MP4"),
+            filename="VIDEO_1762765200000.MP4",
+            kind=MediaKind.BLEEQUP_VIDEO,
+            raw_epoch_ms=1762765200000,
+            raw_utc=datetime.fromtimestamp(1762765200.0, tz=timezone.utc),
+            corrected_utc=datetime.fromtimestamp(1762765200.0, tz=timezone.utc),
+            duration_sec=20.0,
+            internal_create_utc=datetime.fromtimestamp(1762765200.0, tz=timezone.utc),
+        )
+        v_brownout = MediaItem(
+            path=Path("VIDEO_1762768200000.MP4"),
+            filename="VIDEO_1762768200000.MP4",
+            kind=MediaKind.BLEEQUP_VIDEO,
+            raw_epoch_ms=1762768200000,
+            raw_utc=datetime.fromtimestamp(1762768200.0, tz=timezone.utc),
+            corrected_utc=datetime.fromtimestamp(1762768200.0, tz=timezone.utc),
+            duration_sec=20.0,
+            internal_create_utc=datetime.fromtimestamp(1762771500.0, tz=timezone.utc),
+        )
+        with self.assertRaisesRegex(PhysicalOverlapError, r"brownout|monotonic"):
+            assert_physical_continuity([v_early, v_brownout], use_raw=True)
+
 
 if __name__ == "__main__":
     unittest.main()

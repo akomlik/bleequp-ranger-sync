@@ -38,15 +38,59 @@ def check_physical_overlaps(
         curr = raw_captures[idx]
         nxt = raw_captures[idx + 1]
         delta_s = ts_fn(nxt) - ts_fn(curr)
-        # Sub-second collision (e.g. 91ms app batch-remux) or overlap inside clip duration
+        # Sub-second collision (<250ms app batch-remux on videos OR still photos) or overlap inside clip duration
         effective_dur = max(0.0, curr.duration_sec - boundary_tolerance_sec) if curr.duration_sec > 1.0 else 0.0
-        if (curr.duration_sec > 1.0 and delta_s < effective_dur) or (curr.duration_sec > 0.0 and delta_s < 0.25):
+        if (curr.duration_sec > 1.0 and delta_s < effective_dur) or delta_s < 0.25:
             violations.append((curr, nxt, delta_s))
     return violations
 
 
+def check_rtc_brownout_inversions(items: list[MediaItem], *, use_raw: bool = False) -> list[str]:
+    """Detect backward RTC brownouts or QuickTime-atom vs filename monotonicity inversions.
+
+    Catches the silent failure mode where a late-ride clip suffers a -40m..-95m RTC brownout
+    and lands inside an earlier silent cafe/lunch pause without overlapping any clip duration.
+    """
+    ts_fn = (lambda x: x.raw_utc.timestamp()) if use_raw else (lambda x: x.corrected_utc.timestamp())
+    raw_captures = [
+        i
+        for i in items
+        if i.kind in (MediaKind.BLEEQUP_PHOTO, MediaKind.BLEEQUP_VIDEO)
+    ]
+
+    anomalies: list[str] = []
+    # 1. Single-clip internal QuickTime atom vs raw/unshifted timestamp brownout divergence (>= 10 min backward)
+    for item in raw_captures:
+        if item.internal_create_utc is None:
+            continue
+        if (use_raw or (item.shift_reason is None and item.time_shift_sec == 0.0)):
+            atom_delta_s = item.internal_create_utc.timestamp() - ts_fn(item)
+            if atom_delta_s >= 600.0:
+                anomalies.append(
+                    f"{item.filename}: QuickTime internal creation atom ({item.internal_create_utc.isoformat()}) "
+                    f"is +{atom_delta_s/60.0:.1f}m ahead of timestamp (backward RTC brownout)"
+                )
+
+    # 2. Pairwise QuickTime atom monotonicity inversion
+    with_atoms = sorted(
+        [i for i in raw_captures if i.internal_create_utc is not None],
+        key=lambda x: x.internal_create_utc,  # type: ignore[arg-type,return-value]
+    )
+    for idx in range(len(with_atoms) - 1):
+        a = with_atoms[idx]
+        b = with_atoms[idx + 1]
+        atom_gap_s = b.internal_create_utc.timestamp() - a.internal_create_utc.timestamp()  # type: ignore[union-attr]
+        ts_gap_s = ts_fn(b) - ts_fn(a)
+        if atom_gap_s >= 60.0 and ts_gap_s < -60.0:
+            anomalies.append(
+                f"{a.filename} -> {b.filename}: non-monotonic QuickTime atom vs timestamp inversion "
+                f"(Δatom=+{atom_gap_s:.0f}s vs Δts={ts_gap_s:.0f}s, likely RTC brownout)"
+            )
+    return anomalies
+
+
 def assert_physical_continuity(items: list[MediaItem], *, use_raw: bool = False) -> None:
-    """Abort immediately if any non-physical BleeqUP timestamp overlap remains."""
+    """Abort immediately if any non-physical BleeqUP timestamp overlap or RTC brownout remains."""
     violations = check_physical_overlaps(items, use_raw=use_raw)
     if violations:
         details = "; ".join(
@@ -56,6 +100,11 @@ def assert_physical_continuity(items: list[MediaItem], *, use_raw: bool = False)
         raise PhysicalOverlapError(
             f"CRITICAL: Non-physical BleeqUP timestamp overlap detected "
             f"(likely RTC brownout or app batch-remux): {details}"
+        )
+    brownouts = check_rtc_brownout_inversions(items, use_raw=use_raw)
+    if brownouts:
+        raise PhysicalOverlapError(
+            f"CRITICAL: BleeqUP RTC brownout / QuickTime atom monotonicity violation: {'; '.join(brownouts[:3])}"
         )
 
 

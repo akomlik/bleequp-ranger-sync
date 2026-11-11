@@ -10,6 +10,55 @@ from .gpx import haversine_m
 from .models import MediaItem, MediaKind
 
 
+class PhysicalOverlapError(RuntimeError):
+    """Raised when non-physical BleeqUP timestamp overlaps prevent safe auto-sync or metadata writes."""
+
+
+def check_physical_overlaps(
+    items: list[MediaItem],
+    *,
+    use_raw: bool = False,
+    boundary_tolerance_sec: float = 1.0,
+) -> list[tuple[MediaItem, MediaItem, float]]:
+    """Sort BleeqUP clips by timestamp and check `ts[i+1] - ts[i] < clip_duration[i]`.
+
+    Returns list of `(clip_i, clip_next, delta_sec)` violations.
+    """
+    ts_fn = (lambda x: x.raw_utc.timestamp()) if use_raw else (lambda x: x.corrected_utc.timestamp())
+    raw_captures = sorted(
+        [
+            i
+            for i in items
+            if i.kind in (MediaKind.BLEEQUP_PHOTO, MediaKind.BLEEQUP_VIDEO)
+        ],
+        key=ts_fn,
+    )
+    violations: list[tuple[MediaItem, MediaItem, float]] = []
+    for idx in range(len(raw_captures) - 1):
+        curr = raw_captures[idx]
+        nxt = raw_captures[idx + 1]
+        delta_s = ts_fn(nxt) - ts_fn(curr)
+        # Sub-second collision (e.g. 91ms app batch-remux) or overlap inside clip duration
+        effective_dur = max(0.0, curr.duration_sec - boundary_tolerance_sec) if curr.duration_sec > 1.0 else 0.0
+        if (curr.duration_sec > 1.0 and delta_s < effective_dur) or (curr.duration_sec > 0.0 and delta_s < 0.25):
+            violations.append((curr, nxt, delta_s))
+    return violations
+
+
+def assert_physical_continuity(items: list[MediaItem], *, use_raw: bool = False) -> None:
+    """Abort immediately if any non-physical BleeqUP timestamp overlap remains."""
+    violations = check_physical_overlaps(items, use_raw=use_raw)
+    if violations:
+        details = "; ".join(
+            f"{a.filename} (dur {a.duration_sec:.1f}s) -> {b.filename} (Δt={dt_s*1000:.0f}ms)"
+            for a, b, dt_s in violations[:5]
+        )
+        raise PhysicalOverlapError(
+            f"CRITICAL: Non-physical BleeqUP timestamp overlap detected "
+            f"(likely RTC brownout or app batch-remux): {details}"
+        )
+
+
 def parse_offset_seconds(offset_str: str) -> float:
     """Parse an offset string such as '-3837s', '-3600', '-1h', '-1h3m57s' into seconds."""
     s = offset_str.strip()
@@ -179,6 +228,20 @@ def auto_detect_clock_skew(
     if any(abs(i.time_shift_sec) >= 2.0 for i in raw_captures):
         return [], None
 
+    # Pre-flight Physical Overlap Assertion for sub-second app batch-remux collisions
+    # (e.g. clips stamped 91ms apart while several seconds long — no uniform shift can separate them)
+    raw_violations = check_physical_overlaps(raw_captures, use_raw=True)
+    subsec_batch = [(a, b, dt_s) for a, b, dt_s in raw_violations if dt_s < 1.0 and a.duration_sec > 2.0]
+    if subsec_batch:
+        details = "; ".join(
+            f"{a.filename} (dur {a.duration_sec:.1f}s) -> {b.filename} (Δt={dt_s*1000:.0f}ms)"
+            for a, b, dt_s in subsec_batch[:5]
+        )
+        raise PhysicalOverlapError(
+            f"CRITICAL: Non-physical BleeqUP timestamp overlap detected "
+            f"(likely RTC brownout or app batch-remux): {details}"
+        )
+
     gpx_start = gpx_index.timestamps[0]
     gpx_end = gpx_index.timestamps[-1]
 
@@ -276,5 +339,8 @@ def auto_detect_clock_skew(
                 detect_timeline_overlaps(items)
                 names_spec = ",".join(i.filename for i in best_subset)
                 return best_subset, f"{names_spec}:{best_offset:+.0f}s (pre-sync Camera SoC cluster)"
+
+        # If physical overlaps existed and auto-sync could not cleanly resolve them (e.g. multi-step RTC brownout), abort!
+        assert_physical_continuity(items)
 
     return [], None

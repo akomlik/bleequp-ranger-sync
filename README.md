@@ -64,18 +64,21 @@ Across two rides in Mallorca, forensic comparison against Garmin Edge 1040 GPX t
 | :--- | :--- | :--- | :--- |
 | **Thu Oct 29, 2026** (`Coll de sa Batalla`) | **`+2,482s` (`+41m 22s`)** across all 18 clips | In `VIDEO_1793273211837.MP4` (raw filename `12:26:51 CET`, filmed at the Coll de sa Batalla summit cafe stop right after iPhone clip `IMG_8527.MOV` at `11:44:14 CET`), an iPhone lock screen lying face-up on the table in the video frame clearly reads **`Thu Oct 29 11:45`** (`12:26:51 - 11:45:29 = +2482s`). Shifting all 18 clips by `-2482s` aligned the final clip (`VIDEO_1793276331971.MP4` $\rightarrow$ `12:37:29 CET`) within 8 seconds of the Garmin GPX stop at Pro Cycle Hire (`12:37:37 CET`). | ~3.5 days of standby drift since Sunday Oct 25 (`~707s/day`). |
 | **Sat Oct 31, 2026** (`PCH, Can Picafort`) | **`+3,837s` (`+63m 57s`)** on first 7 captures, then **`0s`** after `09:08 CET` | Glasses were connected to the app running **AI-Tracking** from `08:43 CET`, yet the first 7 captures had a `+3,837s` offset until **Camera Settings** were opened at Pro Cycle Hire (`09:08 CET`) to switch video mode from `1080p` to `3K` (remarkably, those first 4 videos were *already* recorded in `2880×1620` 3K by the hardware—the app UI simply displayed a stale `1080p` default because it hadn't queried the Camera SoC yet!). | `+1,355s` (`+22m 35s`) additional drift accumulated in the **46 hours** since the Oct 29 ride (**`+11.3 min/day`**). |
+| **Tue Nov 10, 2026** (`Another Day in Paradise`) | **`0s`** on first 16 clips (`10:39`–`11:36`), then **RTC brownout `-40m` to `-95.5m`** + **`91ms` batch-remux** | Pre-ride handshake gave `0s` drift on the first half of the ride, but as the battery neared empty (with repeated firmware-upgrade prompts and 4 un-flushed `96 Mbps` `mdat` clips), the Camera SoC RTC brownout-reset backward (`-2,400s` to `-5,732s` behind `bigclock.app` calibration photo `IMG_1794306860718.JPG` at `13:09:53 CET`), while app batch offload stamped three Port d'Alcúdia clips (`6133733`, `.824`, `.941`) `91ms` apart in reverse order. | `ranger-sync` now enforces a **Physical Overlap Assertion** (`ts[i+1] - ts[i] < clip_duration[i]`) and immediately aborts `apply` with exit code `2` whenever RTC brownout or app batch-remux overlaps occur. |
 
 To guarantee accurate timestamps on every ride:
 
 1. **Perform a 10-Second Pre-Ride Camera Handshake Before Every Ride (Recommended):**
    - Because the sleep oscillator drifts by **~11–12 minutes per day** in standby, power on the glasses before rolling out, open the **BleeqUP app**, and **open the Camera Settings screen** (verify/toggle `3K` video mode or open the glasses gallery).
    - This forces the app to wake the **Camera SoC** (not just the BLE tracking service) and snap its internal RTC clock to your iPhone's exact millisecond time.
-2. **Skip BleeqUP "AI-Tracking" & Rely on Your Garmin Edge 1040:**
+2. **Low-Battery Offload & Firmware Rule (Critical):**
+   - Whenever the glasses drop near empty on a ride, **plug them into external USB power before opening the BleeqUP iOS app**, and **never install a firmware update until all clips are offloaded and verified on your Mac**. Offloading on a depleted battery can trigger Camera SoC RTC brownouts and batch-remux timestamp collisions (`91ms` spacing in reverse order).
+3. **Skip BleeqUP "AI-Tracking" & Rely on Your Garmin Edge 1040:**
    - You do **not** need to run BleeqUP's in-app AI-Tracking during the ride (which drains iPhone battery and splits GPX files on cafe stops).
    - Record your ride normally on your **Garmin Edge 1040** (which captures superior multi-band GNSS, barometric elevation, speed, heart rate, cadence, and power). Export the `.gpx` (or `.fit` $\rightarrow$ `.gpx`) into your ride folder and run `ranger-sync`—and use your Garmin telemetry directly in DaVinci Resolve / Telemetry Overlay for high-bitrate 3K HUD overlays.
-3. **Avoid Mid-Ride Camera Settings Changes if Unsynced:**
+4. **Avoid Mid-Ride Camera Settings Changes if Unsynced:**
    - If you ever start a ride *without* opening Camera Settings beforehand, all clips will share a single uniform offset (like the `-2482s` offset on Oct 29) as long as you don't open Camera Settings mid-ride.
-   - **Pro Tip (Visual Time Anchor):** Snap one quick photo where your **Garmin Edge 1040 or iPhone lock-screen clock** is visible in the frame, or take one simultaneous clip with your iPhone; if you forgot to sync the glasses before the ride, that single visual anchor gives you the exact second offset for `--shift-files "*:<offset>" --rename-shifted`.
+   - **Pro Tip (Visual Time Anchor):** Snap one quick photo where your **Garmin Edge 1040, `bigclock.app`, or iPhone lock-screen clock** is visible in the frame, or take one simultaneous clip with your iPhone; if you forgot to sync the glasses before the ride, that single visual anchor gives you the exact second offset for `--shift-files "*:<offset>" --rename-shifted`.
 
 ---
 

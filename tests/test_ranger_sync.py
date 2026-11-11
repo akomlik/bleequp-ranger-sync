@@ -6,7 +6,9 @@ import unittest
 from datetime import datetime, timezone
 
 from ranger_sync.anomaly import (
+    PhysicalOverlapError,
     apply_shift_spec,
+    assert_physical_continuity,
     auto_detect_clock_skew,
     detect_timeline_overlaps,
     parse_offset_seconds,
@@ -140,6 +142,43 @@ class TestRangerSync(unittest.TestCase):
         self.assertIn(pre2, shifted)
         self.assertNotIn(mid_peloton, shifted)
         self.assertEqual(len(detect_timeline_overlaps(items)), 0)
+
+    def test_subsecond_batch_remux_overlap_aborts_autosync(self) -> None:
+        # Simulate Nov 10 Port d'Alcúdia 91ms reverse batch-remux collision
+        gpx = GpxIndex(
+            [
+                TrackPoint(timestamp=1794302511.0, lat=39.86, lon=3.14, ele=10.0),
+                TrackPoint(timestamp=1794312443.0, lat=39.86, lon=3.14, ele=10.0),
+            ]
+        )
+        c1 = MediaItem(
+            path=Path("/tmp/VIDEO_1794306133733.MP4"),
+            filename="VIDEO_1794306133733.MP4",
+            kind=MediaKind.BLEEQUP_VIDEO,
+            raw_epoch_ms=1794306133733,
+            raw_utc=datetime.fromtimestamp(1794306133.733, tz=timezone.utc),
+            corrected_utc=datetime.fromtimestamp(1794306133.733, tz=timezone.utc),
+            duration_sec=55.3,
+        )
+        c2 = MediaItem(
+            path=Path("/tmp/VIDEO_1794306133824.MP4"),
+            filename="VIDEO_1794306133824.MP4",
+            kind=MediaKind.BLEEQUP_VIDEO,
+            raw_epoch_ms=1794306133824,
+            raw_utc=datetime.fromtimestamp(1794306133.824, tz=timezone.utc),
+            corrected_utc=datetime.fromtimestamp(1794306133.824, tz=timezone.utc),
+            duration_sec=75.7,
+        )
+        with self.assertRaisesRegex(
+            PhysicalOverlapError,
+            r"CRITICAL: Non-physical BleeqUP timestamp overlap detected",
+        ):
+            auto_detect_clock_skew([c1, c2], gpx)
+        with self.assertRaisesRegex(
+            PhysicalOverlapError,
+            r"CRITICAL: Non-physical BleeqUP timestamp overlap detected",
+        ):
+            assert_physical_continuity([c1, c2])
 
 
 if __name__ == "__main__":

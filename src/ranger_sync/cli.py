@@ -9,7 +9,9 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from .anomaly import (
+    PhysicalOverlapError,
     apply_shift_spec,
+    assert_physical_continuity,
     auto_detect_clock_skew,
     detect_simultaneous_shots,
     detect_timeline_overlaps,
@@ -125,6 +127,12 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Preview metadata writes and renames without modifying files on disk",
     )
+    apply_p.add_argument(
+        "--allow-overlaps",
+        action="store_true",
+        default=False,
+        help="Emergency override: allow writing metadata even when non-physical BleeqUP overlaps remain",
+    )
 
     return parser
 
@@ -142,9 +150,15 @@ def prepare_pipeline(args: argparse.Namespace) -> tuple[ZoneInfo, GpxIndex, list
     if args.shift_files:
         apply_shift_spec(items, args.shift_files)
     elif getattr(args, "auto_shift", True):
-        auto_shifted, auto_desc = auto_detect_clock_skew(items, gpx_index)
-        if auto_shifted and auto_desc:
-            print(f"[✓] AUTO-SOLVED BLEEQUP CLOCK SKEW ({len(auto_shifted)} files): {auto_desc}")
+        try:
+            auto_shifted, auto_desc = auto_detect_clock_skew(items, gpx_index)
+            if auto_shifted and auto_desc:
+                print(f"[✓] AUTO-SOLVED BLEEQUP CLOCK SKEW ({len(auto_shifted)} files): {auto_desc}")
+        except PhysicalOverlapError as exc:
+            if args.command == "inspect" or getattr(args, "allow_overlaps", False):
+                print(f"[!] {exc}", file=sys.stderr)
+            else:
+                raise
 
     # Interpolate GPX fixes for raw BleeqUP captures first
     for item in items:
@@ -301,6 +315,9 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         tz, gpx_index, items = prepare_pipeline(args)
+    except PhysicalOverlapError as exc:
+        print(f"{exc}", file=sys.stderr)
+        return 2
     except Exception as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
@@ -318,6 +335,12 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "apply":
+        if not getattr(args, "allow_overlaps", False):
+            try:
+                assert_physical_continuity(items)
+            except PhysicalOverlapError as exc:
+                print(f"\n{exc}", file=sys.stderr)
+                return 2
         dry_run = args.dry_run
         mode_label = "DRY RUN (no files modified)" if dry_run else "APPLYING METADATA"
         print(f"\n=== {mode_label} ===")
